@@ -1,60 +1,56 @@
 """
-API REST - FASTAPI
-Expone los datos almacenados en Supabase mediante endpoints HTTP.
+API REST - FASTAPI con asyncpg (compatible con Railway)
 """
-
+ 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import psycopg2
-import psycopg2.extras
+import asyncpg
 import os
 import json
 from dotenv import load_dotenv
-
+ 
 load_dotenv()
-
+ 
 app = FastAPI(title="Olist Data Warehouse API", version="1.0.0")
-
+ 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-def get_db():
-    return psycopg2.connect(
+ 
+async def get_db():
+    return await asyncpg.connect(
         host=os.getenv('DB_HOST'),
-        port=os.getenv('DB_PORT', '5432'),
-        dbname=os.getenv('DB_NAME'),
+        port=int(os.getenv('DB_PORT', '5432')),
+        database=os.getenv('DB_NAME'),
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASSWORD'),
-        sslmode='require'
+        ssl='require'
     )
-
+ 
 @app.get("/")
-def root():
+async def root():
     return {"mensaje": "API Olist Data Warehouse funcionando ✅", "version": "1.0.0"}
-
+ 
 @app.get("/api/datos")
-def obtener_datos(limite: int = 50):
+async def obtener_datos(limite: int = 50):
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT id, origen, contenido, fecha FROM datos_recibidos ORDER BY fecha DESC LIMIT %s", (limite,))
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        conn = await get_db()
+        rows = await conn.fetch(
+            "SELECT id, origen, contenido, fecha FROM datos_recibidos ORDER BY fecha DESC LIMIT $1", limite
+        )
+        await conn.close()
         return {"total": len(rows), "datos": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @app.get("/api/ventas-estado")
-def ventas_por_estado():
-    """Ventas por estado usando sellers + order_items (JOIN directo disponible)."""
+async def ventas_por_estado():
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        conn = await get_db()
+        rows = await conn.fetch("""
             SELECT
                 s.seller_state AS estado,
                 COUNT(*) AS total_ordenes,
@@ -66,18 +62,16 @@ def ventas_por_estado():
             ORDER BY total_ventas DESC
             LIMIT 15
         """)
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        await conn.close()
         return {"datos": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @app.get("/api/categorias")
-def ventas_por_categoria():
+async def ventas_por_categoria():
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        conn = await get_db()
+        rows = await conn.fetch("""
             SELECT
                 COALESCE(t.product_category_name_english, p.product_category_name, 'Sin categoria') AS categoria,
                 COUNT(*) AS total_items,
@@ -91,48 +85,45 @@ def ventas_por_categoria():
             ORDER BY total_ventas DESC
             LIMIT 15
         """)
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        await conn.close()
         return {"datos": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @app.get("/api/reviews")
-def distribucion_reviews():
+async def distribucion_reviews():
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT review_score AS score, COUNT(*) AS cantidad FROM order_reviews GROUP BY review_score ORDER BY review_score")
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        conn = await get_db()
+        rows = await conn.fetch(
+            "SELECT review_score AS score, COUNT(*) AS cantidad FROM order_reviews GROUP BY review_score ORDER BY review_score"
+        )
+        await conn.close()
         return {"datos": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @app.get("/api/pagos")
-def tipos_de_pago():
+async def tipos_de_pago():
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        conn = await get_db()
+        rows = await conn.fetch("""
             SELECT payment_type AS tipo_pago, COUNT(*) AS cantidad,
                    ROUND(SUM(payment_value)::numeric, 2) AS total_valor
             FROM order_payments GROUP BY payment_type ORDER BY cantidad DESC
         """)
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        await conn.close()
         return {"datos": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @app.get("/api/telemetria")
-def telemetria_reciente():
+async def telemetria_reciente():
     try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT contenido, fecha FROM datos_recibidos WHERE origen = 'UDP' ORDER BY fecha DESC LIMIT 20")
-        rows = cur.fetchall()
-        cur.close(); conn.close()
+        conn = await get_db()
+        rows = await conn.fetch(
+            "SELECT contenido, fecha FROM datos_recibidos WHERE origen = 'UDP' ORDER BY fecha DESC LIMIT 20"
+        )
+        await conn.close()
         datos = []
         for r in rows:
             try:
