@@ -6,22 +6,20 @@ const SUPABASE_KEY = "sb_publishable_BYZRl5RcmlxPhgGDeTP9_w_jEbYba0i";
 
 async function fetchTable(table, select = "*", limit = 3000) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${select}&limit=${limit}`, {
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`
-    }
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
   });
   if (!res.ok) throw new Error(`Error ${res.status} en ${table}`);
   return res.json();
 }
 
-const COLORS = ["#38bdf8","#a78bfa","#f472b6","#34d399","#fb923c","#fbbf24","#f87171"];
+const COLORS_REVIEWS = ["#f87171","#fb923c","#fbbf24","#4ade80","#22d3ee"];
+const COLORS_PAGOS   = ["#38bdf8","#a78bfa","#f472b6","#34d399"];
 
 function Card({ title, subtitle, children }) {
   return (
-    <div style={{ background: "#1e293b", borderRadius: 12, padding: 20, border: "1px solid #334155" }}>
-      <h3 style={{ margin: "0 0 4px", color: "#f1f5f9", fontSize: 16, fontWeight: 600 }}>{title}</h3>
-      <p style={{ margin: "0 0 16px", color: "#64748b", fontSize: 12 }}>{subtitle}</p>
+    <div style={{ background:"#1e293b", borderRadius:12, padding:20, border:"1px solid #334155" }}>
+      <h3 style={{ margin:"0 0 4px", color:"#f1f5f9", fontSize:16, fontWeight:600 }}>{title}</h3>
+      <p style={{ margin:"0 0 16px", color:"#64748b", fontSize:12 }}>{subtitle}</p>
       {children}
     </div>
   );
@@ -39,46 +37,50 @@ export default function App() {
   useEffect(() => { cargarDatos(); }, []);
 
   async function cargarDatos() {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      // 1. Ventas por estado — usar sellers directamente
+      // 1. Ventas por estado (filtrando "?")
       const sellers = await fetchTable("sellers", "seller_id,seller_state");
-      const items = await fetchTable("order_items", "seller_id,price");
-      
+      const items   = await fetchTable("order_items", "seller_id,product_id,price");
+
       const sellerMap = {};
-      sellers.forEach(s => { sellerMap[s.seller_id] = s.seller_state; });
-      
+      sellers.forEach(s => { if(s.seller_state) sellerMap[s.seller_id] = s.seller_state; });
+
       const ventasMap = {};
       items.forEach(item => {
-        const state = sellerMap[item.seller_id] || "?";
+        const state = sellerMap[item.seller_id];
+        if (!state) return; // ignorar los sin estado
         if (!ventasMap[state]) ventasMap[state] = { estado: state, total_ventas: 0 };
         ventasMap[state].total_ventas += parseFloat(item.price || 0);
       });
       setVentas(Object.values(ventasMap)
-        .sort((a, b) => b.total_ventas - a.total_ventas)
-        .slice(0, 12)
+        .sort((a,b) => b.total_ventas - a.total_ventas)
+        .slice(0,12)
         .map(v => ({ ...v, total_ventas: Math.round(v.total_ventas) })));
 
-      // 2. Categorías — usar products + translations
-      const products = await fetchTable("products", "product_id,product_category_name");
+      // 2. Categorías desde products directamente
+      const products     = await fetchTable("products", "product_id,product_category_name", 3000);
       const translations = await fetchTable("product_category_name_translation", "*");
-      
+
       const transMap = {};
       translations.forEach(t => { transMap[t.product_category_name] = t.product_category_name_english; });
-      
+
       const prodMap = {};
-      products.forEach(p => { prodMap[p.product_id] = transMap[p.product_category_name] || p.product_category_name || "other"; });
-      
+      products.forEach(p => {
+        prodMap[p.product_id] = (transMap[p.product_category_name] || p.product_category_name || "other")
+          .replace(/_/g," ").substring(0,18);
+      });
+
       const catMap = {};
       items.forEach(item => {
-        const cat = (prodMap[item.product_id] || "other").replace(/_/g," ").substring(0,18);
+        const cat = prodMap[item.product_id] || null;
+        if (!cat || cat === "other") return;
         if (!catMap[cat]) catMap[cat] = { categoria: cat, total_ventas: 0 };
         catMap[cat].total_ventas += parseFloat(item.price || 0);
       });
       setCategorias(Object.values(catMap)
-        .sort((a, b) => b.total_ventas - a.total_ventas)
-        .slice(0, 10)
+        .sort((a,b) => b.total_ventas - a.total_ventas)
+        .slice(0,10)
         .map(c => ({ ...c, total_ventas: Math.round(c.total_ventas) })));
 
       // 3. Reviews
@@ -86,26 +88,23 @@ export default function App() {
       const revMap = {};
       reviewData.forEach(r => {
         const s = r.review_score;
-        if (!revMap[s]) revMap[s] = { name: `⭐ ${s} estrellas`, value: 0 };
+        if(!revMap[s]) revMap[s] = { name:`⭐ ${s} estrellas`, value:0 };
         revMap[s].value += 1;
       });
       setReviews(Object.values(revMap).sort((a,b) => a.name.localeCompare(b.name)));
 
       // 4. Pagos
-      const pagData = await fetchTable("order_payments", "payment_type,payment_value");
+      const pagData = await fetchTable("order_payments","payment_type,payment_value");
       const labels = { credit_card:"Tarjeta Crédito", boleto:"Boleto", voucher:"Voucher", debit_card:"Débito" };
       const pagMap = {};
       pagData.forEach(p => {
         const t = labels[p.payment_type] || p.payment_type;
-        if (!pagMap[t]) pagMap[t] = { name: t, value: 0 };
+        if(!pagMap[t]) pagMap[t] = { name:t, value:0 };
         pagMap[t].value += 1;
       });
       setPagos(Object.values(pagMap).sort((a,b) => b.value - a.value));
 
-    } catch(e) {
-      setError(e.message);
-      console.error(e);
-    }
+    } catch(e) { setError(e.message); }
     setLoading(false);
   }
 
@@ -135,11 +134,11 @@ export default function App() {
           <>
             <h2 style={{ color:"#e2e8f0", marginTop:0, marginBottom:24 }}>📈 Métricas del Negocio</h2>
             {loading && <p style={{ color:"#94a3b8", textAlign:"center", padding:60 }}>⏳ Cargando datos desde Supabase...</p>}
-            {error && <p style={{ color:"#f87171", textAlign:"center", padding:20 }}>❌ {error}</p>}
+            {error   && <p style={{ color:"#f87171", textAlign:"center", padding:20 }}>❌ {error}</p>}
             {!loading && !error && (
               <>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24, marginBottom:24 }}>
-                  <Card title="📍 Ventas por Estado" subtitle="Volumen de ventas (BRL) por estado de Brasil">
+                  <Card title="📍 Ventas por Estado" subtitle="Volumen de ventas (BRL) agrupado por estado de Brasil">
                     <ResponsiveContainer width="100%" height={280}>
                       <BarChart data={ventas} margin={{ top:10, right:10, left:0, bottom:5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -152,7 +151,7 @@ export default function App() {
                     </ResponsiveContainer>
                   </Card>
 
-                  <Card title="🏷️ Top Categorías" subtitle="Ventas totales por categoría (top 10)">
+                  <Card title="🏷️ Top Categorías de Productos" subtitle="Ventas totales por categoría (top 10)">
                     <ResponsiveContainer width="100%" height={280}>
                       <BarChart data={categorias} layout="vertical" margin={{ top:5, right:20, left:90, bottom:5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -167,12 +166,12 @@ export default function App() {
                 </div>
 
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24 }}>
-                  <Card title="⭐ Distribución de Reseñas" subtitle="Satisfacción de clientes (1 al 5 estrellas)">
+                  <Card title="⭐ Distribución de Reseñas" subtitle="Satisfacción de clientes (scores del 1 al 5)">
                     <ResponsiveContainer width="100%" height={260}>
                       <PieChart>
                         <Pie data={reviews} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}
                           label={({percent}) => `${(percent*100).toFixed(0)}%`}>
-                          {reviews.map((_,i) => <Cell key={i} fill={COLORS[i]} />)}
+                          {reviews.map((_,i) => <Cell key={i} fill={COLORS_REVIEWS[i]} />)}
                         </Pie>
                         <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid #475569", color:"#f1f5f9" }} />
                         <Legend wrapperStyle={{ color:"#94a3b8", fontSize:12 }} />
@@ -185,7 +184,7 @@ export default function App() {
                       <PieChart>
                         <Pie data={pagos} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}
                           label={({percent}) => `${(percent*100).toFixed(0)}%`}>
-                          {pagos.map((_,i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                          {pagos.map((_,i) => <Cell key={i} fill={COLORS_PAGOS[i % COLORS_PAGOS.length]} />)}
                         </Pie>
                         <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid #475569", color:"#f1f5f9" }} />
                         <Legend wrapperStyle={{ color:"#94a3b8", fontSize:12 }} />
@@ -210,7 +209,7 @@ export default function App() {
               <li><strong style={{color:"#a78bfa"}}>Agente UDP</strong> — Envía telemetría aleatoria en tiempo real (puerto 12001)</li>
               <li><strong style={{color:"#34d399"}}>Servidor Concurrente</strong> — Recibe TCP+UDP con hilos (threading)</li>
               <li><strong style={{color:"#fb923c"}}>Supabase</strong> — Base de datos PostgreSQL en la nube</li>
-              <li><strong style={{color:"#f472b6"}}>FastAPI</strong> — API REST con endpoints /api/datos, /api/ventas-estado, etc.</li>
+              <li><strong style={{color:"#f472b6"}}>FastAPI</strong> — API REST con endpoints /api/datos, /api/ventas-estado</li>
               <li><strong style={{color:"#fbbf24"}}>React + Recharts</strong> — Dashboard web con gráficas interactivas</li>
             </ul>
             <h3 style={{ color:"#e2e8f0" }}>📊 Métricas Estratégicas</h3>
