@@ -125,13 +125,6 @@ El dashboard estará en: http://localhost:5173
    - **Build Command:** `npm run build`
    - **Variable de entorno:** `VITE_API_URL` = URL de tu API en la nube
 
-### API (usar Railway o Render — gratuitos):
-1. Ir a https://render.com → New Web Service
-2. Conectar el repositorio GitHub
-3. Root directory: `api`
-4. Build command: `pip install -r requirements.txt`
-5. Start command: `uvicorn main:app --host 0.0.0.0 --port 8000`
-6. Agregar las variables de entorno (.env)
 
 ---
 
